@@ -19,7 +19,7 @@ from keyboards import (
     kb_add_required_buttons,
     kb_text_delete_time,
     kb_unlink_channels,
-kb_progress,
+    kb_progress,
 )
 
 group_router = Router()
@@ -502,6 +502,49 @@ async def cb_unlink(call: CallbackQuery, db: DB):
             await call.message.edit_text("🔗 Hamma kanallar o‘chirildi.")
         except Exception:
             pass
+
+
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+
+    settings = await db.get_settings(chat_id)
+    required = settings["required_adds"]
+    added = await db.get_added(chat_id, user_id)
+
+    text = (
+        "📊 <b>Tekshiruv:</b>\n\n"
+        f"📌 Kerak: <b>{required}</b>\n"
+        f"👤 Siz: <b>{added}/{required}</b>\n"
+        f"⏳ Qoldi: <b>{max(required - added, 0)}</b> ta"
+    )
+
+    await call.message.edit_text(text, reply_markup=kb_progress(added, required))
+    await call.answer("Yangilandi ✅")
+
+
+
+# =========================
+#   NON-ADMIN: admin komandalarini ishlatsa "admin" desin
+# =========================
+
+ADMIN_COMMANDS = {
+    "help","mymembers","yourmembers","top","delson","clean","add",
+    "textforce","text_time","deforce","priv","privs","set","unlink","setchannel"
+}
+
+@group_router.message(F.text.startswith("/"))
+async def non_admin_commands_reply(message: Message):
+    if message.chat.type not in ("group", "supergroup"):
+        return
+    if not message.from_user:
+        return
+    if await AdminOnly()(message):
+        return
+
+    cmd = (message.text or "").split()[0].lstrip("/").split("@")[0]
+    if cmd in ADMIN_COMMANDS:
+        await message.reply("admin")
+
 @group_router.callback_query(F.data == "check_added")
 async def cb_check_added(call: CallbackQuery, db: DB):
     if not call.message:
@@ -528,29 +571,5 @@ async def cb_check_added(call: CallbackQuery, db: DB):
 @group_router.callback_query(F.data == "noop")
 async def cb_noop(call: CallbackQuery):
     await call.answer("⏳ Hisob tugma orqali yangilanadi", show_alert=False)
-
-
-# =========================
-#   NON-ADMIN: admin komandalarini ishlatsa "admin" desin
-# =========================
-
-ADMIN_COMMANDS = {
-    "help","mymembers","yourmembers","top","delson","clean","add",
-    "textforce","text_time","deforce","priv","privs","set","unlink","setchannel"
-}
-
-@group_router.message(F.text.startswith("/"))
-async def non_admin_commands_reply(message: Message):
-    if message.chat.type not in ("group", "supergroup"):
-        return
-    if not message.from_user:
-        return
-    if await AdminOnly()(message):
-        return
-
-    cmd = (message.text or "").split()[0].lstrip("/").split("@")[0]
-    if cmd in ADMIN_COMMANDS:
-        await message.reply("admin")
-
 
 
