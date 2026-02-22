@@ -31,19 +31,13 @@ CREATE TABLE IF NOT EXISTS linked_channels (
 );
 """
 
-
 class DB:
-    """
-    Tez ishlashi uchun bitta SQLite connection ishlatadi: self.conn
-    """
-
     def __init__(self, path: str = DB_PATH):
         self.path = path
         self.conn: aiosqlite.Connection | None = None
 
     async def init(self):
         self.conn = await aiosqlite.connect(self.path)
-        # SQLite uchun kichik optimizatsiya
         await self.conn.execute("PRAGMA foreign_keys=ON;")
         await self.conn.executescript(CREATE_SQL)
         await self.conn.commit()
@@ -53,7 +47,6 @@ class DB:
             await self.conn.close()
             self.conn = None
 
-    # ---------- SETTINGS ----------
     async def ensure_group(self, chat_id: int):
         await self.conn.execute(
             "INSERT OR IGNORE INTO group_settings(chat_id) VALUES(?)",
@@ -99,7 +92,6 @@ class DB:
         )
         await self.conn.commit()
 
-    # ---------- MEMBERS / ADDED COUNT ----------
     async def inc_added(self, chat_id: int, inviter_id: int, by: int = 1):
         await self.ensure_group(chat_id)
         await self.conn.execute(
@@ -148,7 +140,6 @@ class DB:
         )
         return await cur.fetchall()
 
-    # ---------- PRIVILEGED ----------
     async def add_priv(self, chat_id: int, user_id: int):
         await self.ensure_group(chat_id)
         await self.conn.execute(
@@ -180,7 +171,6 @@ class DB:
         rows = await cur.fetchall()
         return [int(r[0]) for r in rows]
 
-    # ---------- LINKED CHANNELS ----------
     def _clean_username(self, username: str) -> str:
         u = (username or "").strip()
         if u.startswith("@"):
@@ -215,24 +205,3 @@ class DB:
         )
         rows = await cur.fetchall()
         return [r[0] for r in rows]
-async def add_channel(self, chat_id: int, username: str):
-    await self.conn.execute(
-        "INSERT INTO channels (chat_id, username) VALUES (?, ?)",
-        (chat_id, username)
-    )
-    await self.conn.commit()
-
-async def get_channels(self, chat_id: int):
-    cur = await self.conn.execute(
-        "SELECT username FROM channels WHERE chat_id = ?",
-        (chat_id,)
-    )
-    rows = await cur.fetchall()
-    return [r[0] for r in rows]
-
-async def remove_channel(self, chat_id: int, username: str):
-    await self.conn.execute(
-        "DELETE FROM channels WHERE chat_id = ? AND username = ?",
-        (chat_id, username)
-    )
-    await self.conn.commit()
