@@ -19,11 +19,14 @@ from keyboards import (
     kb_add_required_buttons,
     kb_text_delete_time,
     kb_unlink_channels,
+kb_progress,
 )
 
 group_router = Router()
+_last_warn_msg: dict[tuple[int, int], int] = {}  # (chat_id, user_id) -> warning_message_id
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types 
+import Message
 
 # ---------- ADMIN HELP ----------
 @group_router.message(AdminOnly(), Command("help"))
@@ -295,29 +298,30 @@ async def on_new_members(message: Message, db: DB):
 # =========================
 #   GUARD: odam qo‘shish + kanal a’zoligi
 # =========================
-
 @group_router.message(F.text & ~F.text.startswith("/"))
 async def guard_text(message: Message, db: DB):
     if not message.from_user:
         return
+
+    chat_id = message.chat.id
+    user_id = message.from_user.id
 
     # admin chetlab o‘tsin
     if await AdminOnly()(message):
         return
 
     # imtiyoz berilgan chetlab o‘tsin
-    if await db.is_priv(message.chat.id, message.from_user.id):
+    if await db.is_priv(chat_id, user_id):
         return
 
-    settings = await db.get_settings(message.chat.id)
-    required = int(settings.get("required_adds", 0))
+    settings = await db.get_settings(chat_id)
+    required = int(settings.get("required_adds", 1))
     delete_after = int(settings.get("force_text_delete_after", 0))
 
-    user_id = message.from_user.id
     user_link = f"<a href='tg://user?id={user_id}'>{message.from_user.full_name}</a>"
 
     # 1) Kanal a’zoligi tekshiruvi (agar kanallar bor bo‘lsa)
-    channels = await db.get_channels(message.chat.id)
+    channels = await db.get_channels(chat_id)
     if channels:
         ok = await is_subscribed_all(message.bot, user_id, channels)
         if not ok:
@@ -327,7 +331,7 @@ async def guard_text(message: Message, db: DB):
                 pass
 
             warn = await message.bot.send_message(
-                chat_id=message.chat.id,
+                chat_id=chat_id,
                 text=f"❌ {user_link}, avval kanal(lar)ga a'zo bo‘ling:",
                 parse_mode="HTML",
                 reply_markup=kb_join_channels(channels)
@@ -344,40 +348,40 @@ async def guard_text(message: Message, db: DB):
             return
 
     # 2) Odam qo‘shish talabi
-    added = await db.get_added(message.chat.id, user_id)
+    added = await db.get_added(chat_id, user_id)
     if required > 0 and added < required:
         try:
             await message.delete()
         except Exception:
             pass
 
-        warn = await message.bot.send_message(
-            chat_id=message.chat.id,
-            text=f"❌ {user_link}, siz hali odam qo‘shmagansiz!",
-            parse_mode="HTML"
+        text = (
+            "❌ <b>Siz hali odam qo‘shmagansiz!</b>\n\n"
+            f"📌 Guruhda yozish uchun avval <b>{required} ta</b> odam qo‘shing.\n"
+            f"📊 Hozir: <b>{added}/{required}</b>\n"
+            f"⏳ Qoldi: <b>{max(required - added, 0)}</b> ta\n\n"
+            f"👤 {user_link}"
         )
+
+        msg = await message.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            parse_mode="HTML",
+            reply_markup=kb_progress(added, required)
+        )
+
+        _last_warn_msg[(chat_id, user_id)] = msg.message_id
 
         if delete_after > 0:
             async def _del():
                 await asyncio.sleep(delete_after)
                 try:
-                    await warn.delete()
+                    await msg.delete()
                 except Exception:
                     pass
             asyncio.create_task(_del())
+
         return
-
-
-@group_router.callback_query(F.data == "check_sub")
-async def cb_check_sub(call: CallbackQuery, db: DB):
-    if not call.message:
-        return
-    channels = await db.get_channels(call.message.chat.id)
-    if not channels:
-        return await call.answer("Kanal sozlanmagan.", show_alert=True)
-
-    ok = await is_subscribed_all(call.bot, call.from_user.id, channels)
-    await call.answer("✅ A'zo bo‘lgansiz!" if ok else "❌ Hali a'zo emassiz.", show_alert=True)
 
 
 # =========================
@@ -498,6 +502,32 @@ async def cb_unlink(call: CallbackQuery, db: DB):
             await call.message.edit_text("🔗 Hamma kanallar o‘chirildi.")
         except Exception:
             pass
+            @group_router.callback_query(F.data == "check_added")
+async def cb_check_added(call: CallbackQuery, db: DB):
+    if not call.message:
+        return
+
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+
+    settings = await db.get_settings(chat_id)
+    required = settings["required_adds"]
+    added = await db.get_added(chat_id, user_id)
+
+    text = (
+        "📊 <b>Tekshiruv:</b>\n\n"
+        f"📌 Kerak: <b>{required}</b>\n"
+        f"👤 Siz: <b>{added}/{required}</b>\n"
+        f"⏳ Qoldi: <b>{max(required - added, 0)}</b> ta"
+    )
+
+    await call.message.edit_text(text, reply_markup=kb_progress(added, required))
+    await call.answer("Yangilandi ✅")
+
+
+@group_router.callback_query(F.data == "noop")
+async def cb_noop(call: CallbackQuery):
+    await call.answer("⏳ Hisob tugma orqali yangilanadi", show_alert=False)
 
 
 # =========================
@@ -521,3 +551,4 @@ async def non_admin_commands_reply(message: Message):
     cmd = (message.text or "").split()[0].lstrip("/").split("@")[0]
     if cmd in ADMIN_COMMANDS:
         await message.reply("admin")
+
