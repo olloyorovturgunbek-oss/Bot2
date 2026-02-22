@@ -502,7 +502,7 @@ async def cb_unlink(call: CallbackQuery, db: DB):
             await call.message.edit_text("🔗 Hamma kanallar o‘chirildi.")
         except Exception:
             pass
-            @group_router.callback_query(F.data == "check_added")
+@group_router.callback_query(F.data == "check_added")
 async def cb_check_added(call: CallbackQuery, db: DB):
     if not call.message:
         return
@@ -551,5 +551,6 @@ async def non_admin_commands_reply(message: Message):
     cmd = (message.text or "").split()[0].lstrip("/").split("@")[0]
     if cmd in ADMIN_COMMANDS:
         await message.reply("admin")
+
 
 
