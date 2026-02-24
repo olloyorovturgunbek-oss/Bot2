@@ -131,9 +131,10 @@ def kb_unlink_channels(channels: list[str]) -> InlineKeyboardMarkup:
 # =========================
 #  PROGRESS (REALTIME)
 # =========================
-def kb_progress(added: int, required: int) -> InlineKeyboardMarkup:
+def kb_progress(added: int, required: int, target_user_id: int) -> InlineKeyboardMarkup:
     added = int(added)
     required = max(int(required), 0)
+    target_user_id = int(target_user_id)
 
     left = max(required - added, 0)
     percent = 0
@@ -143,14 +144,13 @@ def kb_progress(added: int, required: int) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(
         text=f"📊 {added}/{required} | Qoldi: {left} | {percent}%",
-        callback_data="noop"
+        callback_data="noop",
     )
+    kb.button(text="✅ Odam qo‘shdim (tekshir)", callback_data=f"check_added:{target_user_id}")
+    kb.button(text="🔄 Yangilash", callback_data=f"check_added:{target_user_id}")
 
-    kb.button(text="✅ Odam qo‘shdim (tekshir)", callback_data="check_added")
-    kb.button(text="🔄 Yangilash", callback_data="check_added")
-
-    # ✅ YANGI: Imtiyoz berish (admin uchun)
-    kb.button(text="🧑‍💼 Imtiyoz berish", callback_data="give_priv")
+    # ✅ replysiz imtiyoz: user_id callback_data ichida
+    kb.button(text="🧑‍💼 Imtiyoz berish", callback_data=f"give_priv:{target_user_id}")
 
     kb.adjust(1, 2, 1)
     return kb.as_markup()
