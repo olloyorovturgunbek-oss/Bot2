@@ -145,7 +145,12 @@ def kb_progress(added: int, required: int) -> InlineKeyboardMarkup:
         text=f"📊 {added}/{required} | Qoldi: {left} | {percent}%",
         callback_data="noop"
     )
+
     kb.button(text="✅ Odam qo‘shdim (tekshir)", callback_data="check_added")
     kb.button(text="🔄 Yangilash", callback_data="check_added")
-    kb.adjust(1, 2)
+
+    # ✅ YANGI: Imtiyoz berish (admin uchun)
+    kb.button(text="🧑‍💼 Imtiyoz berish", callback_data="give_priv")
+
+    kb.adjust(1, 2, 1)
     return kb.as_markup()
