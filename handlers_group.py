@@ -13,7 +13,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from db import DB
-from states import ForceTextState, ForceTextTimeState
+from states import ForceTextState  # ForceTextTimeState ishlatilmayapti bo'lsa ham zarar yo'q
 from admin_filters import AdminOnly, cb_is_admin
 
 from keyboards import (
@@ -23,7 +23,7 @@ from keyboards import (
     kb_add_required_buttons,
     kb_text_delete_time,
     kb_unlink_channels,
-    kb_progress,
+    kb_progress,  # ✅ kb_progress(added, required, target_user_id)
 )
 
 group_router = Router()
@@ -38,7 +38,7 @@ _last_warn_msg: Dict[Tuple[int, int], int] = {}
 def kb_join_channels(channels: List[str]) -> InlineKeyboardMarkup:
     rows = []
     for ch in channels:
-        ch = ch.lstrip("@")
+        ch = (ch or "").lstrip("@")
         rows.append([InlineKeyboardButton(text=f"➡️ @{ch}", url=f"https://t.me/{ch}")])
     rows.append([InlineKeyboardButton(text="✅ Tekshirish", callback_data="check_sub")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -46,7 +46,7 @@ def kb_join_channels(channels: List[str]) -> InlineKeyboardMarkup:
 
 async def is_subscribed_all(bot, user_id: int, channels: List[str]) -> bool:
     for ch in channels:
-        ch = ch.lstrip("@")
+        ch = (ch or "").lstrip("@")
         try:
             member = await bot.get_chat_member(chat_id=f"@{ch}", user_id=user_id)
             if member.status in ("left", "kicked"):
@@ -54,6 +54,20 @@ async def is_subscribed_all(bot, user_id: int, channels: List[str]) -> bool:
         except Exception:
             return False
     return True
+
+
+async def safe_delete_message(msg: Message):
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+
+async def safe_delete_by_id(bot, chat_id: int, message_id: int):
+    try:
+        await bot.delete_message(chat_id, message_id)
+    except Exception:
+        pass
 
 
 # =========================
@@ -72,7 +86,7 @@ def kb_setchannel_menu() -> InlineKeyboardMarkup:
 def kb_delete_channels(channels: List[str]) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for ch in channels:
-        ch = ch.lstrip("@")
+        ch = (ch or "").lstrip("@")
         kb.button(text=f"❌ @{ch}", callback_data=f"sc:del:{ch}")
     kb.button(text="✖️ Yopish", callback_data="sc:close")
     kb.adjust(1)
@@ -380,14 +394,8 @@ async def on_new_members(message: Message, db: DB):
         return
     inviter_id = inviter.id
 
-    # bot o'zi qo'shilsa sanamaslik ixtiyoriy:
-    # for m in message.new_chat_members:
-    #     if m.is_bot:
-    #         return
-
     await db.inc_added(chat_id, inviter_id, len(message.new_chat_members))
 
-    # Agar ogohlantirish xabari bor bo'lsa, uni edit qilib yangilaymiz
     warn_id = _last_warn_msg.get((chat_id, inviter_id))
     if not warn_id:
         return
@@ -396,8 +404,17 @@ async def on_new_members(message: Message, db: DB):
     required = int(settings.get("required_adds", 1))
     added = await db.get_added(chat_id, inviter_id)
 
+    # ✅ ismni link qilib chiqarish
+    try:
+        member = await message.bot.get_chat_member(chat_id, inviter_id)
+        name = member.user.full_name
+    except Exception:
+        name = "User"
+    user_link = f"<a href='tg://user?id={inviter_id}'>{name}</a>"
+
     text = (
         "✅ <b>Hisob yangilandi!</b>\n\n"
+        f"👤 {user_link}\n"
         f"📌 Kerak: <b>{required}</b>\n"
         f"📊 Hozir: <b>{added}/{required}</b>\n"
         f"⏳ Qoldi: <b>{max(required - added, 0)}</b> ta"
@@ -409,7 +426,7 @@ async def on_new_members(message: Message, db: DB):
             message_id=warn_id,
             text=text,
             parse_mode="HTML",
-            reply_markup=kb_progress(added, required),
+            reply_markup=kb_progress(added, required, inviter_id),  # ✅ 3-argument
         )
     except Exception:
         _last_warn_msg.pop((chat_id, inviter_id), None)
@@ -438,7 +455,7 @@ async def guard_text(message: Message, db: DB):
 
     user_link = f"<a href='tg://user?id={user_id}'>{message.from_user.full_name}</a>"
 
-    # 1) Kanal a’zoligi tekshiruvi
+    # 1) Kanal a’zoligi
     channels = await db.get_channels(chat_id)
     if channels:
         ok = await is_subscribed_all(message.bot, user_id, channels)
@@ -458,10 +475,7 @@ async def guard_text(message: Message, db: DB):
             if delete_after > 0:
                 async def _del():
                     await asyncio.sleep(delete_after)
-                    try:
-                        await warn.delete()
-                    except Exception:
-                        pass
+                    await safe_delete_by_id(message.bot, chat_id, warn.message_id)
                 asyncio.create_task(_del())
             return
 
@@ -475,17 +489,17 @@ async def guard_text(message: Message, db: DB):
 
         text = (
             "❌ <b>Siz hali odam qo‘shmagansiz!</b>\n\n"
+            f"👤 {user_link}\n"
             f"📌 Guruhda yozish uchun avval <b>{required} ta</b> odam qo‘shing.\n"
             f"📊 Hozir: <b>{added}/{required}</b>\n"
-            f"⏳ Qoldi: <b>{max(required - added, 0)}</b> ta\n\n"
-            f"👤 {user_link}"
+            f"⏳ Qoldi: <b>{max(required - added, 0)}</b> ta"
         )
 
         msg = await message.bot.send_message(
             chat_id=chat_id,
             text=text,
             parse_mode="HTML",
-            reply_markup=kb_progress(added, required),
+            reply_markup=kb_progress(added, required, user_id),  # ✅ 3-argument
         )
 
         _last_warn_msg[(chat_id, user_id)] = msg.message_id
@@ -493,10 +507,7 @@ async def guard_text(message: Message, db: DB):
         if delete_after > 0:
             async def _del():
                 await asyncio.sleep(delete_after)
-                try:
-                    await msg.delete()
-                except Exception:
-                    pass
+                await safe_delete_by_id(message.bot, chat_id, msg.message_id)
             asyncio.create_task(_del())
 
         return
@@ -519,57 +530,67 @@ async def cb_check_sub(call: CallbackQuery, db: DB):
 
 
 # =========================
-#   CALLBACK: ADDED CHECK
+#   CALLBACK: ADDED CHECK (TARGET USER)
 # =========================
-@group_router.callback_query(F.data == "check_added")
+@group_router.callback_query(F.data.startswith("check_added:"))
 async def cb_check_added(call: CallbackQuery, db: DB):
     if not call.message:
         return
 
     chat_id = call.message.chat.id
-    user_id = call.from_user.id
+    target_user_id = int(call.data.split(":", 1)[1])
 
     settings = await db.get_settings(chat_id)
     required = int(settings.get("required_adds", 1))
-    added = await db.get_added(chat_id, user_id)
+    added = await db.get_added(chat_id, target_user_id)
+
+    # ✅ ismni link qilib chiqarish
+    try:
+        member = await call.bot.get_chat_member(chat_id, target_user_id)
+        name = member.user.full_name
+    except Exception:
+        name = "User"
+
+    user_link = f"<a href='tg://user?id={target_user_id}'>{name}</a>"
 
     text = (
         "📊 <b>Tekshiruv:</b>\n\n"
+        f"👤 {user_link}\n"
         f"📌 Kerak: <b>{required}</b>\n"
-        f"👤 Siz: <b>{added}/{required}</b>\n"
+        f"📊 Hozir: <b>{added}/{required}</b>\n"
         f"⏳ Qoldi: <b>{max(required - added, 0)}</b> ta"
     )
 
-    await call.message.edit_text(text, parse_mode="HTML", reply_markup=kb_progress(added, required))
+    await call.message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=kb_progress(added, required, target_user_id),
+    )
     await call.answer("Yangilandi ✅")
+
+
+# =========================
+#   CALLBACK: GIVE PRIV (REPLYSIZ)
+# =========================
+@group_router.callback_query(F.data.startswith("give_priv:"))
+async def cb_give_priv(call: CallbackQuery, db: DB):
+    if not call.message:
+        return
+
+    if not await cb_is_admin(call):
+        return await call.answer("admin", show_alert=True)
+
+    chat_id = call.message.chat.id
+    target_user_id = int(call.data.split(":", 1)[1])
+
+    await db.add_priv(chat_id, target_user_id)
+    await call.answer("✅ Imtiyoz berildi", show_alert=True)
 
 
 @group_router.callback_query(F.data == "noop")
 async def cb_noop(call: CallbackQuery):
     await call.answer("⏳ Hisob tugma orqali yangilanadi", show_alert=False)
-@group_router.callback_query(F.data == "give_priv")
-async def cb_give_priv(call: CallbackQuery, db: DB):
-    if not call.message:
-        return
 
-    # faqat admin bosadi
-    if not await cb_is_admin(call):
-        return await call.answer("admin", show_alert=True)
-
-    # kimga imtiyoz beramiz? -> o‘sha ogohlantirish xabari tagidagi user (call.from_user emas!)
-    # Bu tugmani odatda admin bosadi, lekin imtiyoz beriladigan odamni aniqlash uchun
-    # eng oson yo‘l: admin avval o‘sha odamga REPLY qilib /priv ishlatsin.
-    # Tugma variantida esa: admin reply qilib bosadigan usul yo‘q.
-    #
-    # Shuning uchun tugma "admin bosganda" reply talab qilamiz:
-
-    if not call.message.reply_to_message or not call.message.reply_to_message.from_user:
-        return await call.answer("Imtiyoz berish uchun avval o‘sha odamga reply qiling va /priv ishlating.", show_alert=True)
-
-    uid = call.message.reply_to_message.from_user.id
-    await db.add_priv(call.message.chat.id, uid)
-
-    await call.answer("✅ Imtiyoz berildi", show_alert=True)
 
 # =========================
 #   NON-ADMIN: admin komandalarini ishlatsa "admin" desin
@@ -592,4 +613,3 @@ async def non_admin_commands_reply(message: Message):
     cmd = (message.text or "").split()[0].lstrip("/").split("@")[0]
     if cmd in ADMIN_COMMANDS:
         await message.reply("admin")
-
