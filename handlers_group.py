@@ -547,7 +547,29 @@ async def cb_check_added(call: CallbackQuery, db: DB):
 @group_router.callback_query(F.data == "noop")
 async def cb_noop(call: CallbackQuery):
     await call.answer("⏳ Hisob tugma orqali yangilanadi", show_alert=False)
+@group_router.callback_query(F.data == "give_priv")
+async def cb_give_priv(call: CallbackQuery, db: DB):
+    if not call.message:
+        return
 
+    # faqat admin bosadi
+    if not await cb_is_admin(call):
+        return await call.answer("admin", show_alert=True)
+
+    # kimga imtiyoz beramiz? -> o‘sha ogohlantirish xabari tagidagi user (call.from_user emas!)
+    # Bu tugmani odatda admin bosadi, lekin imtiyoz beriladigan odamni aniqlash uchun
+    # eng oson yo‘l: admin avval o‘sha odamga REPLY qilib /priv ishlatsin.
+    # Tugma variantida esa: admin reply qilib bosadigan usul yo‘q.
+    #
+    # Shuning uchun tugma "admin bosganda" reply talab qilamiz:
+
+    if not call.message.reply_to_message or not call.message.reply_to_message.from_user:
+        return await call.answer("Imtiyoz berish uchun avval o‘sha odamga reply qiling va /priv ishlating.", show_alert=True)
+
+    uid = call.message.reply_to_message.from_user.id
+    await db.add_priv(call.message.chat.id, uid)
+
+    await call.answer("✅ Imtiyoz berildi", show_alert=True)
 
 # =========================
 #   NON-ADMIN: admin komandalarini ishlatsa "admin" desin
@@ -570,3 +592,4 @@ async def non_admin_commands_reply(message: Message):
     cmd = (message.text or "").split()[0].lstrip("/").split("@")[0]
     if cmd in ADMIN_COMMANDS:
         await message.reply("admin")
+
